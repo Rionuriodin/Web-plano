@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galeri Foto Planogram Drive</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
+        h1 { color: #333; text-align: center; }
+        .gallery-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .gallery-item {
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #fff;
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        .gallery-item img {
+            width: 100%;
+            height: auto;
+            max-height: 200px;
+            object-fit: cover;
+            display: block;
+            margin-bottom: 8px;
+        }
+        .file-name {
+            font-size: 0.9em;
+            color: #555;
+        }
+        #auth-button {
+            display: block;
+            margin: 20px auto;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        #status {
+            text-align: center;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Galeri Foto Planogram</h1>
+    <p id="status">Klik tombol di bawah untuk masuk dan memuat galeri.</p>
+    <button id="auth-button">Masuk ke Google Drive</button>
+    
+    <div class="gallery-container" id="gallery">
+        </div>
+
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script>
+        // ==========================================================
+        //         LANGKAH 1: KONFIGURASI API KEY & FOLDER ID
+        // ==========================================================
+
+        // Ganti dengan Client ID Anda dari Google Cloud Console
+        const CLIENT_ID = 'GANTI_DENGAN_CLIENT_ID_ANDA.apps.googleusercontent.com'; 
+        // Ganti dengan API Key Anda
+        const API_KEY = 'GANTI_DENGAN_API_KEY_ANDA'; 
+
+        // Scope (Izin) yang diperlukan: Akses metadata dan konten Drive
+        const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
+        const SCOPES = 'https://www.googleapis.com/auth/drive.readonly'; 
+
+        // ID Folder Drive yang Anda berikan (Unique IDs)
+        // Folder 4 (https://drive.google.com/drive/fol/1870YvKx42ij7JAnOL2-sNxqLlo70YwRa) 
+        // telah diperbaiki diasumsikan /fol/ adalah kesalahan ketik dan harusnya /folders/
+        const FOLDER_IDS = [
+            '1BmzizFqsiCzDJGzZr2ndU_x60WxQsfug', 
+            '1kkDIKZbX5l7KyygZ66XLYhE-lhTEOhKX', 
+            '1870YvKx42ij7JAnOL2-sNxqLlo70YwRa', 
+            '1oC7Ur-dJ1gvZysdUmiX2iths4FYAcM4g', 
+            '1ihhP6h6eXeghfggSs9k1R6twOkr-fQ0Z', 
+            '1UY3vLSQt7PUvl45MbLv7IBhKQL9eGHEo', 
+            '15ekMvRcve65WN4AB4AiNCigWHGwfKWSc'
+        ];
+
+        // Query untuk Google Drive API: 
+        // 1. Cari file di dalam salah satu FOLDER_IDS
+        // 2. Tipe MIME adalah gambar (mimeType contains 'image/')
+        // 3. Nama file mengandung kata 'Planogram'
+        const PARENT_QUERY = FOLDER_IDS.map(id => `'${id}' in parents`).join(' or ');
+        const QUERY = `(${PARENT_QUERY}) and mimeType contains 'image/' and fullText contains 'Planogram' and trashed = false`;
+
+
+        // ==========================================================
+        //         LANGKAH 2: FUNGSI AUTENTIKASI DAN INISIALISASI
+        // ==========================================================
+
+        let gapiInited = false;
+        let gisInited = false;
+        let tokenClient;
+
+        // Inisialisasi gapi (Google API client library)
+        function gapiLoaded() {
+            gapi.load('client', initializeGapiClient);
+        }
+
+        async function initializeGapiClient() {
+            await gapi.client.init({
+                apiKey: API_KEY,
+                discoveryDocs: DISCOVERY_DOCS,
+            });
+            gapiInited = true;
+            maybeEnableAuthButton();
+        }
+
+        // Inisialisasi Google Identity Services (untuk Oauth2)
+        function gisLoaded() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: '', // callback diset saat permintaan token
+            });
+            gisInited = true;
+            maybeEnableAuthButton();
+        }
+
+        function maybeEnableAuthButton() {
+            if (gapiInited && gisInited) {
+                document.getElementById('auth-button').onclick = handleAuthClick;
+                document.getElementById('auth-button').disabled = false;
+                document.getElementById('status').innerText = 'Siap. Klik tombol untuk masuk.';
+            }
+        }
+
+        // Handler saat tombol 'Masuk' diklik
+        function handleAuthClick() {
+            tokenClient.callback = async (resp) => {
+                if (resp.error !== undefined) {
+                    throw (resp);
+                }
+                document.getElementById('auth-button').innerText = 'Memuat Foto...';
+                document.getElementById('auth-button').disabled = true;
+                await listFiles();
+            };
+
+            if (gapi.client.getToken() === null) {
+                // Minta izin autentikasi
+                tokenClient.requestAccessToken({prompt: 'consent'});
+            } else {
+                // Token sudah ada, langsung ambil
+                tokenClient.requestAccessToken({prompt: ''});
+            }
+        }
+
+        // ==========================================================
+        //         LANGKAH 3: FUNGSI UNTUK MENGAMBIL DAN MENAMPILKAN FILE
+        // ==========================================================
+
+        async function listFiles() {
+            document.getElementById('status').innerText = 'Mencari foto Planogram di Google Drive...';
+            try {
+                // Panggil Drive API dengan query yang telah ditentukan
+                const response = await gapi.client.drive.files.list({
+                    pageSize: 50, // Batasi jumlah hasil
+                    q: QUERY,
+                    fields: 'nextPageToken, files(id, name, webContentLink, thumbnailLink)',
+                });
+
+                const files = response.result.files;
+                const gallery = document.getElementById('gallery');
+                gallery.innerHTML = ''; // Kosongkan galeri
+
+                if (files && files.length > 0) {
+                    document.getElementById('status').innerText = `Ditemukan ${files.length} foto Planogram.`;
+                    
+                    files.forEach((file) => {
+                        const fileLink = `https://drive.google.com/uc?export=view&id=${file.id}`; // Link untuk tampilan web
+                        const item = document.createElement('div');
+                        item.classList.add('gallery-item');
+                        
+                        // Gunakan thumbnailLink untuk gambar pratinjau yang lebih cepat
+                        const img = document.createElement('img');
+                        img.src = file.thumbnailLink || fileLink; 
+                        img.alt = file.name;
+                        img.loading = 'lazy';
+                        
+                        // Buat link ke file di Drive
+                        const link = document.createElement('a');
+                        link.href = fileLink; 
+                        link.target = '_blank';
+                        link.appendChild(img);
+
+                        const name = document.createElement('div');
+                        name.classList.add('file-name');
+                        name.innerText = file.name;
+
+                        item.appendChild(link);
+                        item.appendChild(name);
+                        gallery.appendChild(item);
+                    });
+                } else {
+                    document.getElementById('status').innerText = 'Tidak ditemukan foto Planogram dengan kriteria tersebut di folder yang ditentukan.';
+                }
+            } catch (err) {
+                document.getElementById('status').innerHTML = 'Terjadi kesalahan saat mengambil file: ' + err.result.error.message;
+            } finally {
+                document.getElementById('auth-button').style.display = 'none'; // Sembunyikan tombol setelah selesai
+            }
+        }
+        
+        // Panggil saat halaman dimuat
+        window.onload = () => {
+            gapiLoaded();
+            gisLoaded();
+        };
+
+    </script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+</body>
+</html>
